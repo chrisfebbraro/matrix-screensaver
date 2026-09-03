@@ -95,8 +95,9 @@ wait_for_screensaver_window() {
   done
 }
 
-# Terminal font: Omarchy's screensaver configs use 18 pt; the rain looks better smaller,
-# with rows tighter than the Nerd Font's ~18 px line metrics.
+# Terminal font: the system monospace font Omarchy is set to, at 9 pt rather than the 18 pt
+# of Omarchy's screensaver configs, with rows tighter than a Nerd Font's ~18 px line metrics.
+font=$(omarchy-font-current 2>/dev/null); font="${font:-JetBrainsMono Nerd Font}"
 size="${MATRIX_TTY_FONT_SIZE:-9}"
 lh="${MATRIX_TTY_LINE_HEIGHT:-14px}"
 adj="${MATRIX_TTY_LINE_HEIGHT:-}"
@@ -119,7 +120,7 @@ for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
   case $terminal in
     *Alacritty*) hypr_exec alacritty --class="$CLASS" --config-file "$OMARCHY_PATH/default/alacritty/screensaver.toml" -o "font.size=$size" ${adj:+-o "font.offset.y=${adj%px}"} -e "$TTY" "${args[@]}" ;;
     *ghostty*)   hypr_exec ghostty --class="$CLASS" --config-file="$OMARCHY_PATH/default/ghostty/screensaver" --font-size="$size" ${adj:+--adjust-cell-height="${adj%px}"} -e "$TTY" "${args[@]}" ;;
-    *foot*)      hypr_exec foot --app-id="$CLASS" --config="$OMARCHY_PATH/default/foot/screensaver.ini" -o "main.font=JetBrainsMono Nerd Font:size=$size" ${lh:+-o "main.line-height=$lh"} -e "$TTY" "${args[@]}" ;;
+    *foot*)      hypr_exec foot --app-id="$CLASS" --config="$OMARCHY_PATH/default/foot/screensaver.ini" -o "main.font=$font:size=$size" ${lh:+-o "main.line-height=$lh"} -e "$TTY" "${args[@]}" ;;
     *kitty*)     hypr_exec kitty --class="$CLASS" --override "font_size=$size" --override window_padding_width=0 ${lh:+--override "modify_font=cell_height ${lh%px}px"} -e "$TTY" "${args[@]}" ;;
   esac
   wait_for_screensaver_window

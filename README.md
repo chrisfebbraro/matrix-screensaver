@@ -13,31 +13,30 @@ your terminal, wired in as the screensaver on an [Omarchy](https://omarchy.org) 
 
 ## Install
 
+Omarchy 4 with foot, Alacritty, Ghostty or kitty as the default terminal.
+
 ```bash
 git clone https://github.com/chrisfebbraro/matrix-screensaver ~/Projects/matrix-screensaver
-cd ~/Projects/matrix-screensaver
-make
-mkdir -p ~/.local/bin && ln -sf "$PWD/omarchy-launch-screensaver" ~/.local/bin/
+~/Projects/matrix-screensaver/install.sh
 ```
 
-Then make `~/.local/bin` win over Omarchy's own launcher. Omarchy's `~/.bashrc` sets
-PATH on its first line; add this right after it, above the interactive-shell check, so the
-Omarchy shell's login shells see it too:
+The script builds the renderer, links the launcher into `~/.local/bin`, adds one line to
+`~/.bashrc` so that directory is searched before Omarchy's own (placed right after
+Omarchy's PATH setup, where the Omarchy shell's login shells see it), and verifies that a
+login shell now resolves `omarchy-launch-screensaver` to this one. Run it again after a
+`git pull` to rebuild; every step is skipped when already done.
 
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-That is the whole installation. Omarchy's idle service runs `omarchy-launch-screensaver`
-after `idle.screensaver` seconds (`~/.config/omarchy/shell.json`), the Omarchy menu's
-"Screensaver" entry runs the same command, and both now find this one first. It runs in
-your default terminal (foot, Alacritty, Ghostty or kitty) with Omarchy's screensaver
-terminal config, one fullscreen window per monitor, and falls back to Omarchy's stock
-screensaver if the binary is not built.
+From then on Omarchy's idle service, which runs `omarchy-launch-screensaver` after
+`idle.screensaver` seconds (`~/.config/omarchy/shell.json`), and the Omarchy menu's
+"Screensaver" entry both start this screensaver: your default terminal with Omarchy's
+screensaver config and your system monospace font, one fullscreen window per monitor.
+If the binary is missing it falls back to Omarchy's stock screensaver.
 
 Try it now: `omarchy-launch-screensaver force`. Any key dismisses it.
 
-To uninstall, remove the symlink and the PATH line.
+```bash
+~/Projects/matrix-screensaver/install.sh uninstall   # removes the link and the PATH line
+```
 
 ## Files
 
@@ -45,6 +44,7 @@ To uninstall, remove the symlink and the PATH line.
 | --- | --- |
 | `matrix-rain-tty.c` | The renderer. Plain C11, needs only libm; raw ANSI escapes, 24-bit colour, redraws only changed cells. |
 | `omarchy-launch-screensaver` | Drop-in replacement for Omarchy's launcher. |
+| `install.sh` | Builds, links, fixes the PATH order and verifies; `install.sh uninstall` reverses it. |
 | `Makefile` | `make` builds `matrix-rain-tty`. |
 | `tests/e2e.sh` | Manual live check: launch as the idle service would, confirm the window, dismiss with a synthetic keypress. |
 
