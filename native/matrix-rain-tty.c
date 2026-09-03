@@ -6,7 +6,8 @@
 // sawtooth as the GPU renderers (after Rezmason's matrix), the glyphs cycle the same
 // way, but everything is drawn with plain text and 24-bit ANSI colours.
 //
-//   matrix-rain-tty [--screensaver] [--style operator|classic] [--head white|green] [--flat] [--trail N] [--fps N] [--gap N]
+//   matrix-rain-tty [--screensaver] [--style operator|classic] [--head white|green] [--flat] [--trail N]
+//                   [--speed-min F] [--speed-max F] [--period-k F] [--fps N] [--gap N]
 //                   [--fall-speed F] [--cycle-speed F] [--raindrop-length F]
 //                   [--animation-speed F]
 //
@@ -49,6 +50,7 @@ typedef struct {
 typedef struct {
     const char *style, *color;
     float animationSpeed, fallSpeed, cycleSpeed, raindropLength, fps, trail;
+    float speedMin, speedMax, periodK;   // column speed band (x fallSpeed) and period-vs-speed exponent
     int gap;
     bool screensaver, flat;
 } Config;
@@ -138,13 +140,17 @@ static void get_size(int *cols, int *rows) {
 }
 
 static void usage(FILE *out) {
-    fputs("usage: matrix-rain-tty [--screensaver] [--style operator|classic] [--head white|green] [--flat] [--trail N] [--fps N] [--gap N]\n"
+    fputs("usage: matrix-rain-tty [--screensaver] [--style operator|classic] [--head white|green] [--flat] [--trail N]\n"
+          "                       [--speed-min F] [--speed-max F] [--period-k F] [--fps N] [--gap N]\n"
           "                       [--fall-speed F] [--cycle-speed F] [--raindrop-length F] [--animation-speed F]\n"
           "  --screensaver  exit on any key; otherwise q, Escape or Ctrl-C quits\n"
           "  --style        operator (flat, film operator screens; default) or classic (title gradient)\n"
           "  --head         colour of the leading glyph of each drop: white (default) or green; operator style only\n"
           "  --flat         operator style: one flat green for the whole stream instead of fading to black\n"
           "  --trail N      rows lit behind each head (default 20 operator; 0 = tied to the period, classic default)\n"
+          "  --speed-min F  column speed band, as multiples of --fall-speed: ~95% of columns fall between\n"
+          "  --speed-max F  these (defaults 0.5 and 1.5); the rest are faster or slower outliers, never stopped\n"
+          "  --period-k F   how much faster columns thin out: period = base * (speed/mean)^k (default 1; 0 = constant)\n"
           "  --gap N        blank columns between rain columns (default 0)\n", out);
 }
 
@@ -158,6 +164,9 @@ static bool parse_args(int argc, char **argv, Config *c) {
         NUM("--animation-speed", animationSpeed)
         NUM("--fps", fps)
         NUM("--trail", trail)
+        NUM("--speed-min", speedMin)
+        NUM("--speed-max", speedMax)
+        NUM("--period-k", periodK)
 #undef NUM
         if (!strcmp(a, "--gap")) { if (!v) return false; c->gap = atoi(v); if (c->gap < 0) return false; i++; continue; }
         if (!strcmp(a, "--style")) { if (!v) return false; c->style = v; i++; continue; }
@@ -171,6 +180,7 @@ static bool parse_args(int argc, char **argv, Config *c) {
     if (strcmp(c->style, "operator") && strcmp(c->style, "classic")) return false;
     if (strcmp(c->color, "white") && strcmp(c->color, "green")) return false;
     if (c->fps <= 0 || c->raindropLength < 0) return false;
+    if (c->speedMin <= 0 || c->speedMax < c->speedMin || c->periodK < 0) return false;
     return true;
 }
 
@@ -182,7 +192,7 @@ static double now_seconds(void) {
 
 int main(int argc, char **argv) {
     Config cfg = { .style = "operator", .color = "white", .animationSpeed = 1, .fallSpeed = 0, .cycleSpeed = 0, .raindropLength = 0,
-                   .fps = 30, .trail = -1, .gap = -1, .screensaver = false, .flat = false };
+                   .fps = 30, .trail = -1, .speedMin = 0.5f, .speedMax = 1.5f, .periodK = 1.0f, .gap = -1, .screensaver = false, .flat = false };
     // Per-style defaults (after Rezmason's "classic" and "operator" versions), unless overridden.
     Config user = cfg;
     if (!parse_args(argc, argv, &user)) { usage(stderr); return 2; }
@@ -215,7 +225,7 @@ int main(int argc, char **argv) {
 
     int cols = 0, rows = 0;
     Cell *cells = NULL;
-    double *colOffset = NULL, *colSpeed = NULL, *bright = NULL;   // per-column constants, per-frame brightness
+    double *colOffset = NULL, *colSpeed = NULL, *colPeriod = NULL, *bright = NULL;   // per-column constants, per-frame brightness
     char *out = NULL;
     size_t outCap = 0;
     double last = now_seconds(), start = last;
@@ -233,13 +243,21 @@ int main(int argc, char **argv) {
                 cells[i].age = (float)hash13(x, y, 7.0);
                 cells[i].drawnLevel = 0xff;    // force a redraw
             }
-            free(colOffset); free(colSpeed); free(bright);
+            free(colOffset); free(colSpeed); free(colPeriod); free(bright);
             colOffset = malloc(sizeof *colOffset * cols);
             colSpeed = malloc(sizeof *colSpeed * cols);
+            colPeriod = malloc(sizeof *colPeriod * cols);
             bright = malloc(sizeof *bright * cols * (rows + 1));
             for (int x = 0; x < cols; x++) {
                 colOffset[x] = random_float(x + 0.5, 0.0) * 1000.0;
-                colSpeed[x] = random_float(x + 0.5 + 0.1, 0.0) * 0.5 + 0.5;
+                // Column speed ~ Normal(mean, sigma) with ~95% of columns inside [speedMin, speedMax];
+                // the tails are the fast and slow outliers, clamped at 3 sigma and never below a tenth of the mean.
+                double mean = 0.5 * (cfg.speedMin + cfg.speedMax), sigma = 0.25 * (cfg.speedMax - cfg.speedMin);
+                double u1 = fmax(1e-9, random_float(x + 0.5 + 0.1, 0.0)), u2 = random_float(x + 0.5, 0.3);
+                double z = sqrt(-2.0 * log(u1)) * cos(2.0 * PI * u2);
+                colSpeed[x] = fmin(mean + 3.0 * sigma, fmax(fmax(0.1 * mean, mean - 3.0 * sigma), mean + sigma * z));
+                // Faster columns get a longer period (fewer drops): period = base * (speed / mean)^k.
+                colPeriod[x] = cfg.raindropLength * pow(colSpeed[x] / mean, cfg.periodK);
             }
             outCap = (size_t)cols * rows * 24 + 64;
             out = realloc(out, outCap);
@@ -260,7 +278,7 @@ int main(int argc, char **argv) {
             double *col = bright + (size_t)x * (rows + 1);
             for (int r = 0; r <= rows; r++) {
                 double gy = (rows - 1 - r) + 0.5;
-                col[r] = 1.0 - frac(wobble((gy * 0.01 + columnTime) / cfg.raindropLength));
+                col[r] = 1.0 - frac(wobble((gy * 0.01 + columnTime) / colPeriod[x]));
             }
         }
 
@@ -277,7 +295,7 @@ int main(int argc, char **argv) {
                     if (cursor) level = pal.levels - 1;
                     else if (cfg.trail > 0) {
                         // Trail measured in rows behind the head, independent of the period.
-                        double d = (1.0 - b) * 100.0 * cfg.raindropLength;
+                        double d = (1.0 - b) * 100.0 * colPeriod[x];
                         if (d < cfg.trail) {
                             if (pal.brightnessOverride > 0) level = 1;
                             else { level = 1 + (int)((1.0 - d / cfg.trail) * (pal.levels - 2)); if (level > pal.levels - 2) level = pal.levels - 2; }
@@ -328,7 +346,7 @@ int main(int argc, char **argv) {
     }
 
     free(cells);
-    free(colOffset); free(colSpeed); free(bright);
+    free(colOffset); free(colSpeed); free(colPeriod); free(bright);
     free(out);
     return 0;
 }

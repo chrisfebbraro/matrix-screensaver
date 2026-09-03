@@ -119,12 +119,15 @@ for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
   if [[ $mode == terminal ]]; then
     set_cursor_hidden true
     # Omarchy's screensaver configs use an 18 pt font; the rain looks better smaller.
-    # MATRIX_TTY_LINE_HEIGHT (e.g. 18px) spaces the rows out without changing the glyph size.
+    # MATRIX_TTY_LINE_HEIGHT sets the row height without changing the glyph size. foot and
+    # kitty take it as the row height (default 14px; the font's own is ~18px). Alacritty and
+    # Ghostty only take an adjustment, so for them it is applied only when set explicitly.
     size="${MATRIX_TTY_FONT_SIZE:-9}"
-    lh="${MATRIX_TTY_LINE_HEIGHT:-}"
+    lh="${MATRIX_TTY_LINE_HEIGHT:-14px}"
+    adj="${MATRIX_TTY_LINE_HEIGHT:-}"
     case $terminal in
-      *Alacritty*) hypr_exec alacritty --class="$CLASS" --config-file "$OMARCHY_PATH/default/alacritty/screensaver.toml" -o "font.size=$size" ${lh:+-o "font.offset.y=${lh%px}"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;
-      *ghostty*)   hypr_exec ghostty --class="$CLASS" --config-file="$OMARCHY_PATH/default/ghostty/screensaver" --font-size="$size" ${lh:+--adjust-cell-height="${lh%px}"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;
+      *Alacritty*) hypr_exec alacritty --class="$CLASS" --config-file "$OMARCHY_PATH/default/alacritty/screensaver.toml" -o "font.size=$size" ${adj:+-o "font.offset.y=${adj%px}"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;
+      *ghostty*)   hypr_exec ghostty --class="$CLASS" --config-file="$OMARCHY_PATH/default/ghostty/screensaver" --font-size="$size" ${adj:+--adjust-cell-height="${adj%px}"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;
       *foot*)      hypr_exec foot --app-id="$CLASS" --config="$OMARCHY_PATH/default/foot/screensaver.ini" -o "main.font=JetBrainsMono Nerd Font:size=$size" ${lh:+-o "main.line-height=$lh"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;
       *kitty*)     hypr_exec kitty --class="$CLASS" --override "font_size=$size" --override window_padding_width=0 ${lh:+--override "modify_font=cell_height ${lh%px}px"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;
     esac

@@ -81,16 +81,21 @@ rm ~/.local/bin/omarchy-launch-screensaver
 ## Tweaks
 
 Terminal: `MATRIX_TTY_FONT_SIZE` sets the terminal font size (default 9; Omarchy's own
-screensaver uses 18). `MATRIX_TTY_LINE_HEIGHT` spaces the rows out without changing the
-glyph size, e.g. `18px` (the row height for foot and kitty; extra pixels per row for
-Alacritty and Ghostty). `MATRIX_TTY_ARGS` passes options through, e.g.
+screensaver uses 18). `MATRIX_TTY_LINE_HEIGHT` sets the row height without changing the
+glyph size (default `14px`; the font's own line height is about 18 px). For foot and kitty
+it is the row height; for Alacritty and Ghostty it is applied as an adjustment. `MATRIX_TTY_ARGS` passes options through, e.g.
 `MATRIX_TTY_ARGS="--style classic --gap 1" omarchy-launch-screensaver force`.
 Options: `--style operator|classic` (operator: flat, film operator screens; classic:
 the title gradient in a few shades), `--head white|green` (colour of the leading glyph; white), `--flat` (one green for the
 whole stream instead of fading to black behind the head), `--gap N` (blank columns between streams, 0),
 `--fall-speed` (0.105 operator / 0.3 classic), `--cycle-speed` (0.005 / 0.03, per 1/60 s),
 `--raindrop-length` (0.8 / 0.35; larger means fewer drops per column), `--trail N` (rows lit
-behind each head; 20 operator, 0 classic = tied to the period), `--fps` (30),
+behind each head; 20 operator, 0 classic = tied to the period), `--speed-min F` and
+`--speed-max F` (column speeds are normally distributed, as multiples of the fall speed,
+with about 95% of columns inside this band, 0.5 to 1.5, and the rest faster or slower
+outliers that are clamped so nothing stops), `--period-k F` (faster columns get a longer
+period, so fewer drops: period = base x (speed / mean)^k; 1, and 0 for a constant period),
+`--fps` (30),
 `--animation-speed` (1).
 
 GPU: `MATRIX_ARGS` does the same for `matrix-rain`: `--columns` (160; glyph size is
