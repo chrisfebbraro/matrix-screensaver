@@ -1,0 +1,136 @@
+#!/bin/bash
+
+# Matrix digital rain screensaver for Omarchy.
+#
+# Drop-in replacement for Omarchy's omarchy-launch-screensaver. It is symlinked into
+# ~/.local/bin, which ~/.bashrc puts ahead of $OMARCHY_PATH/bin, so the Omarchy shell's
+# idle service (shell.json -> idle.screensaver) and the Omarchy menu launch this instead
+# of the terminal (ttfx) screensaver. Falls back to the stock screensaver if Chromium is
+# not installed.
+#
+# Usage: omarchy-launch-screensaver [force]      (force ignores the screensaver-off toggle)
+#        omarchy-launch-screensaver stop
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+MATRIX_DIR="${MATRIX_DIR:-$(dirname "$SELF")}"
+PAGE="file://$MATRIX_DIR/matrix.html?screensaver=1"
+CLASS="org.omarchy.screensaver"
+BROWSER="${MATRIX_BROWSER:-chromium}"
+PROFILE_BASE="${XDG_RUNTIME_DIR:-/tmp}/matrix-screensaver"
+STOCK="${OMARCHY_PATH:-/usr/share/omarchy}/bin/omarchy-launch-screensaver"
+
+stop_screensaver() {
+  pkill -f "[o]rg.omarchy.screensaver" 2>/dev/null
+}
+
+if [[ $1 == stop ]]; then
+  stop_screensaver
+  exit 0
+fi
+
+# Exit early if a screensaver is already running
+pgrep -f "[o]rg.omarchy.screensaver" >/dev/null && exit 0
+
+# Allow screensaver to be turned off but also force started
+if omarchy-toggle-enabled screensaver-off && [[ $1 != "force" ]]; then
+  exit 1
+fi
+
+# No Chromium? Use Omarchy's own screensaver instead.
+if ! command -v "$BROWSER" >/dev/null 2>&1; then
+  exec "$STOCK" "$@"
+fi
+
+focused=$(omarchy-hyprland-monitor-focused)
+
+hypr_focus_monitor() {
+  hyprctl dispatch "hl.dsp.focus({ monitor = \"$1\" })" >/dev/null 2>&1 || hyprctl dispatch focusmonitor "$1" >/dev/null
+}
+
+hypr_exec() {
+  local command
+  printf -v command '%q ' "$@"
+  hyprctl dispatch "hl.dsp.exec_cmd([[$command]])" >/dev/null 2>&1 || hyprctl dispatch exec -- bash -lc "$command" >/dev/null
+}
+
+SOCKET="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
+
+# Open Hyprland's event stream before spawning anything, so a window that maps
+# quickly can't emit its openwindow event before we are listening for it.
+exec {events}< <(socat -U - "UNIX-CONNECT:$SOCKET")
+socat_pid=$!
+
+# Block until this monitor's screensaver window actually opens before moving focus on.
+# Records the window address so the watchdog below can recognise our windows.
+windows=()
+wait_for_screensaver_window() {
+  local line deadline=$((SECONDS + 5))
+  while ((SECONDS < deadline)) && IFS= read -r -t $((deadline - SECONDS)) -u "$events" line; do
+    if [[ $line == openwindow\>\>*,$CLASS,* ]]; then
+      line=${line#openwindow>>}
+      windows+=("${line%%,*}")
+      return 0
+    fi
+  done
+}
+
+rm -rf "$PROFILE_BASE"-* 2>/dev/null
+for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
+  hypr_focus_monitor "$m"
+  # One Chromium process per monitor, each with a throwaway profile so it never
+  # collides with a browser you already have open.
+  hypr_exec "$BROWSER" \
+    --user-data-dir="$PROFILE_BASE-$m" \
+    --class="$CLASS" \
+    --kiosk \
+    --no-first-run \
+    --noerrdialogs \
+    --disable-infobars \
+    --disable-session-crashed-bubble \
+    --disable-features=TranslateUI \
+    --ozone-platform-hint=auto \
+    --hide-scrollbars \
+    "$PAGE"
+  wait_for_screensaver_window
+done
+
+hypr_focus_monitor "$focused"
+
+# Watchdog: keeps reading Hyprland events in the background and tears the
+# screensaver down when
+#   - the page reports input by changing its title to "... [exit]",
+#   - focus moves to a window that is not a screensaver (the user did something), or
+#   - every screensaver window has closed.
+(
+  is_ours() { local a; for a in "${windows[@]}"; do [[ $a == "$1" ]] && return 0; done; return 1; }
+  remaining=${#windows[@]}
+  while IFS= read -r -u "$events" line; do
+    case $line in
+      windowtitlev2\>\>*)
+        line=${line#windowtitlev2>>}
+        if is_ours "${line%%,*}" && [[ ${line#*,} == *"[exit]"* ]]; then stop_screensaver; break; fi
+        ;;
+      windowtitle\>\>*)
+        addr=${line#windowtitle>>}
+        if is_ours "$addr" && hyprctl clients -j | jq -e --arg a "0x$addr" '.[] | select(.address == $a) | .title | test("\\[exit\\]")' >/dev/null 2>&1; then
+          stop_screensaver; break
+        fi
+        ;;
+      activewindowv2\>\>*)
+        addr=${line#activewindowv2>>}
+        if [[ -n $addr && $addr != "," ]] && ! is_ours "$addr" && pgrep -f "[o]rg.omarchy.screensaver" >/dev/null; then
+          stop_screensaver; break
+        fi
+        ;;
+      closewindow\>\>*)
+        addr=${line#closewindow>>}
+        if is_ours "$addr" && (( --remaining <= 0 )); then stop_screensaver; break; fi
+        ;;
+    esac
+  done
+  exec {events}<&-
+  [[ -n $socat_pid ]] && kill "$socat_pid" 2>/dev/null
+  rm -rf "$PROFILE_BASE"-* 2>/dev/null
+) >/dev/null 2>&1 &
+disown
+exec {events}<&-

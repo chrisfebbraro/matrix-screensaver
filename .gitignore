@@ -1,0 +1,8 @@
+# Editor and OS noise
+*.swp
+*~
+.DS_Store
+
+# Local experiments (screenshots, scratch pages)
+*.png
+scratch/
