@@ -125,6 +125,16 @@ for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
     size="${MATRIX_TTY_FONT_SIZE:-9}"
     lh="${MATRIX_TTY_LINE_HEIGHT:-14px}"
     adj="${MATRIX_TTY_LINE_HEIGHT:-}"
+    # Colour the rain from the current Omarchy theme: the stream takes the accent, the
+    # head the bright foreground. MATRIX_TTY_THEME=0 keeps the film green. Anything in
+    # MATRIX_TTY_ARGS comes later on the command line, so it still overrides.
+    theme_args=()
+    if [[ ${MATRIX_TTY_THEME:-1} != 0 ]]; then
+      accent=$(omarchy-theme-color accent 2>/dev/null); head=$(omarchy-theme-color bright_foreground 2>/dev/null)
+      [[ $accent =~ ^#?[0-9A-Fa-f]{6}$ ]] && theme_args+=(--stream "${accent#\#}")
+      [[ $head =~ ^#?[0-9A-Fa-f]{6}$ ]] && theme_args+=(--head "${head#\#}")
+    fi
+    MATRIX_TTY_ARGS="${theme_args[*]} $MATRIX_TTY_ARGS"
     case $terminal in
       *Alacritty*) hypr_exec alacritty --class="$CLASS" --config-file "$OMARCHY_PATH/default/alacritty/screensaver.toml" -o "font.size=$size" ${adj:+-o "font.offset.y=${adj%px}"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;
       *ghostty*)   hypr_exec ghostty --class="$CLASS" --config-file="$OMARCHY_PATH/default/ghostty/screensaver" --font-size="$size" ${adj:+--adjust-cell-height="${adj%px}"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;

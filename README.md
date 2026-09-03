@@ -49,7 +49,7 @@ only needed for `matrix-rain`.
 ## How it is wired in
 
 Omarchy's shell runs `omarchy-launch-screensaver` after `idle.screensaver` seconds
-(`~/.config/omarchy/shell.json`, currently 600 s) and locks after `idle.lock` (900 s).
+(`~/.config/omarchy/shell.json`, currently 300 s) and locks after `idle.lock` (900 s).
 The Omarchy menu's "Screensaver" entry runs the same command. `~/.bashrc` puts
 `~/.local/bin` ahead of `$OMARCHY_PATH/bin`, so both pick up this launcher instead of
 the stock one.
@@ -85,16 +85,22 @@ screensaver uses 18). `MATRIX_TTY_LINE_HEIGHT` sets the row height without chang
 glyph size (default `14px`; the font's own line height is about 18 px). For foot and kitty
 it is the row height; for Alacritty and Ghostty it is applied as an adjustment. `MATRIX_TTY_ARGS` passes options through, e.g.
 `MATRIX_TTY_ARGS="--style classic --gap 1" omarchy-launch-screensaver force`.
+The rain takes its colours from the current Omarchy theme: the stream uses the theme's
+accent and the head its bright foreground, read with `omarchy-theme-color` at launch, so
+switching themes recolours the screensaver. `MATRIX_TTY_THEME=0` keeps the film green.
 Options: `--style operator|classic` (operator: flat, film operator screens; classic:
-the title gradient in a few shades), `--head white|green` (colour of the leading glyph; white), `--flat` (one green for the
-whole stream instead of fading to black behind the head), `--gap N` (blank columns between streams, 0),
+the title gradient in a few shades), `--head C` (colour of the leading glyph: white, green,
+or hex RRGGBB), `--stream RRGGBB` (stream colour, fading to black; default the film green),
+`--flat` (one colour for the whole stream instead of fading to black behind the head),
+`--gap N` (blank columns between streams, 0),
 `--fall-speed` (0.105 operator / 0.3 classic), `--cycle-speed` (0.005 / 0.03, per 1/60 s),
 `--raindrop-length` (0.8 / 0.35; larger means fewer drops per column), `--trail N` (rows lit
 behind each head; 20 operator, 0 classic = tied to the period), `--speed-min F` and
 `--speed-max F` (column speeds are normally distributed, as multiples of the fall speed,
 with about 95% of columns inside this band, 0.5 to 1.5, and the rest faster or slower
-outliers that are clamped so nothing stops), `--period-k F` (faster columns get a longer
-period, so fewer drops: period = base x (speed / mean)^k; 1, and 0 for a constant period),
+outliers that are clamped so nothing stops), `--speed-k F` (scales the whole band, 0.9),
+`--period-k F` (faster columns get a longer
+period, so fewer drops: period = base x (speed / mean)^k; 0.8, and 0 for a constant period),
 `--fps` (30),
 `--animation-speed` (1).
 

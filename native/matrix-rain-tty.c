@@ -6,8 +6,8 @@
 // sawtooth as the GPU renderers (after Rezmason's matrix), the glyphs cycle the same
 // way, but everything is drawn with plain text and 24-bit ANSI colours.
 //
-//   matrix-rain-tty [--screensaver] [--style operator|classic] [--head white|green] [--flat] [--trail N]
-//                   [--speed-min F] [--speed-max F] [--period-k F] [--fps N] [--gap N]
+//   matrix-rain-tty [--screensaver] [--style operator|classic] [--head C] [--stream RRGGBB] [--flat] [--trail N]
+//                   [--speed-min F] [--speed-max F] [--speed-k F] [--period-k F] [--fps N] [--gap N]
 //                   [--fall-speed F] [--cycle-speed F] [--raindrop-length F]
 //                   [--animation-speed F]
 //
@@ -48,9 +48,9 @@ typedef struct {
 } Palette;
 
 typedef struct {
-    const char *style, *color;
+    const char *style, *color, *stream;   // head colour (white|green|RRGGBB), stream colour (RRGGBB or NULL for green)
     float animationSpeed, fallSpeed, cycleSpeed, raindropLength, fps, trail;
-    float speedMin, speedMax, periodK;   // column speed band (x fallSpeed) and period-vs-speed exponent
+    float speedMin, speedMax, speedK, periodK;   // column speed band (x fallSpeed), a factor on the whole band, and the period-vs-speed exponent
     int gap;
     bool screensaver, flat;
 } Config;
@@ -97,7 +97,21 @@ static void sgr_hsl(char *out, size_t n, double h, double s, double l, double ga
     snprintf(out, n, "\x1b[38;2;%d;%d;%dm", r, g, b);
 }
 
-static void make_palette(Palette *p, const char *style, const char *color, bool flat) {
+static bool parse_hex(const char *hex, int rgb[3]) {
+    if (hex[0] == '#') hex++;
+    if (strlen(hex) != 6) return false;
+    for (int i = 0; i < 3; i++) {
+        char pair[3] = { hex[2 * i], hex[2 * i + 1], 0 }, *end;
+        rgb[i] = (int)strtol(pair, &end, 16);
+        if (*end) return false;
+    }
+    return true;
+}
+static void sgr_rgb(char *out, size_t n, const int rgb[3], double gain) {
+    snprintf(out, n, "\x1b[38;2;%d;%d;%dm", (int)(rgb[0] * gain + 0.5), (int)(rgb[1] * gain + 0.5), (int)(rgb[2] * gain + 0.5));
+}
+
+static void make_palette(Palette *p, const char *style, const char *color, const char *stream, bool flat) {
     memset(p, 0, sizeof *p);
     if (!strcmp(style, "classic")) {
         // The title-sequence gradient, quantised to a few shades of the green palette.
@@ -114,21 +128,27 @@ static void make_palette(Palette *p, const char *style, const char *color, bool 
         // the tail (a terminal has no alpha, but on black this reads as opacity); --flat
         // uses a single green like Rezmason's operator version.
         p->baseBrightness = -0.5f; p->baseContrast = 1.1f; p->brightnessThreshold = 0;
+        int streamRgb[3], headRgb[3];
+        bool customStream = stream && parse_hex(stream, streamRgb);
         if (flat) {
             p->levels = 3;
             p->brightnessOverride = 0.22f;
-            sgr_hsl(p->sgr[1], sizeof p->sgr[1], 0.4, 0.8, 0.4, 1.0);
+            if (customStream) sgr_rgb(p->sgr[1], sizeof p->sgr[1], streamRgb, 0.8);
+            else sgr_hsl(p->sgr[1], sizeof p->sgr[1], 0.4, 0.8, 0.4, 1.0);
         } else {
             p->levels = 10;
             p->brightnessOverride = 0;
             for (int i = 1; i < p->levels - 1; i++) {
                 double at = (double)(i - 1) / (p->levels - 3);          // 0 = tail, 1 = just behind the head
-                sgr_hsl(p->sgr[i], sizeof p->sgr[i], 0.4, 0.8, 0.08 + at * 0.37, 1.0);
+                if (customStream) sgr_rgb(p->sgr[i], sizeof p->sgr[i], streamRgb, 0.12 + at * 0.88);
+                else sgr_hsl(p->sgr[i], sizeof p->sgr[i], 0.4, 0.8, 0.08 + at * 0.37, 1.0);
             }
         }
         int head = p->levels - 1;
         if (!strcmp(color, "white")) snprintf(p->sgr[head], sizeof p->sgr[head], "\x1b[38;2;255;255;255m");   // the drop: pure white
-        else sgr_hsl(p->sgr[head], sizeof p->sgr[head], 0.375, 1.0, 0.66, 1.6);          // or the bright mint of Rezmason's operator
+        else if (!strcmp(color, "green")) sgr_hsl(p->sgr[head], sizeof p->sgr[head], 0.375, 1.0, 0.66, 1.6);   // the bright mint of Rezmason's operator
+        else if (parse_hex(color, headRgb)) sgr_rgb(p->sgr[head], sizeof p->sgr[head], headRgb, 1.0);
+        else snprintf(p->sgr[head], sizeof p->sgr[head], "\x1b[38;2;255;255;255m");
     }
 }
 
@@ -140,17 +160,19 @@ static void get_size(int *cols, int *rows) {
 }
 
 static void usage(FILE *out) {
-    fputs("usage: matrix-rain-tty [--screensaver] [--style operator|classic] [--head white|green] [--flat] [--trail N]\n"
-          "                       [--speed-min F] [--speed-max F] [--period-k F] [--fps N] [--gap N]\n"
+    fputs("usage: matrix-rain-tty [--screensaver] [--style operator|classic] [--head C] [--stream RRGGBB] [--flat] [--trail N]\n"
+          "                       [--speed-min F] [--speed-max F] [--speed-k F] [--period-k F] [--fps N] [--gap N]\n"
           "                       [--fall-speed F] [--cycle-speed F] [--raindrop-length F] [--animation-speed F]\n"
           "  --screensaver  exit on any key; otherwise q, Escape or Ctrl-C quits\n"
           "  --style        operator (flat, film operator screens; default) or classic (title gradient)\n"
-          "  --head         colour of the leading glyph of each drop: white (default) or green; operator style only\n"
+          "  --head C       colour of the leading glyph: white (default), green, or a hex RRGGBB; operator style only\n"
+          "  --stream C     colour of the stream as hex RRGGBB (default: matrix green); it fades to black behind the head\n"
           "  --flat         operator style: one flat green for the whole stream instead of fading to black\n"
           "  --trail N      rows lit behind each head (default 20 operator; 0 = tied to the period, classic default)\n"
           "  --speed-min F  column speed band, as multiples of --fall-speed: ~95% of columns fall between\n"
           "  --speed-max F  these (defaults 0.5 and 1.5); the rest are faster or slower outliers, never stopped\n"
-          "  --period-k F   how much faster columns thin out: period = base * (speed/mean)^k (default 1; 0 = constant)\n"
+          "  --speed-k F    scales --speed-min and --speed-max together (default 0.9)\n"
+          "  --period-k F   how much faster columns thin out: period = base * (speed/mean)^k (default 0.8; 0 = constant)\n"
           "  --gap N        blank columns between rain columns (default 0)\n", out);
 }
 
@@ -167,10 +189,12 @@ static bool parse_args(int argc, char **argv, Config *c) {
         NUM("--speed-min", speedMin)
         NUM("--speed-max", speedMax)
         NUM("--period-k", periodK)
+        NUM("--speed-k", speedK)
 #undef NUM
         if (!strcmp(a, "--gap")) { if (!v) return false; c->gap = atoi(v); if (c->gap < 0) return false; i++; continue; }
         if (!strcmp(a, "--style")) { if (!v) return false; c->style = v; i++; continue; }
         if (!strcmp(a, "--head")) { if (!v) return false; c->color = v; i++; continue; }
+        if (!strcmp(a, "--stream")) { if (!v) return false; c->stream = v; i++; continue; }
         if (!strcmp(a, "--screensaver")) { c->screensaver = true; continue; }
         if (!strcmp(a, "--flat")) { c->flat = true; continue; }
         if (!strcmp(a, "--help") || !strcmp(a, "-h")) { usage(stdout); exit(0); }
@@ -178,9 +202,11 @@ static bool parse_args(int argc, char **argv, Config *c) {
         return false;
     }
     if (strcmp(c->style, "operator") && strcmp(c->style, "classic")) return false;
-    if (strcmp(c->color, "white") && strcmp(c->color, "green")) return false;
+    int rgb[3];
+    if (strcmp(c->color, "white") && strcmp(c->color, "green") && !parse_hex(c->color, rgb)) return false;
+    if (c->stream && !parse_hex(c->stream, rgb)) return false;
     if (c->fps <= 0 || c->raindropLength < 0) return false;
-    if (c->speedMin <= 0 || c->speedMax < c->speedMin || c->periodK < 0) return false;
+    if (c->speedMin <= 0 || c->speedMax < c->speedMin || c->speedK <= 0 || c->periodK < 0) return false;
     return true;
 }
 
@@ -191,8 +217,8 @@ static double now_seconds(void) {
 }
 
 int main(int argc, char **argv) {
-    Config cfg = { .style = "operator", .color = "white", .animationSpeed = 1, .fallSpeed = 0, .cycleSpeed = 0, .raindropLength = 0,
-                   .fps = 30, .trail = -1, .speedMin = 0.5f, .speedMax = 1.5f, .periodK = 1.0f, .gap = -1, .screensaver = false, .flat = false };
+    Config cfg = { .style = "operator", .color = "white", .stream = NULL, .animationSpeed = 1, .fallSpeed = 0, .cycleSpeed = 0, .raindropLength = 0,
+                   .fps = 30, .trail = -1, .speedMin = 0.5f, .speedMax = 1.5f, .speedK = 0.9f, .periodK = 0.8f, .gap = -1, .screensaver = false, .flat = false };
     // Per-style defaults (after Rezmason's "classic" and "operator" versions), unless overridden.
     Config user = cfg;
     if (!parse_args(argc, argv, &user)) { usage(stderr); return 2; }
@@ -207,7 +233,7 @@ int main(int argc, char **argv) {
     if (!isatty(STDOUT_FILENO)) { fputs("matrix-rain-tty: stdout is not a terminal\n", stderr); return 1; }
 
     Palette pal;
-    make_palette(&pal, cfg.style, cfg.color, cfg.flat);
+    make_palette(&pal, cfg.style, cfg.color, cfg.stream, cfg.flat);
 
     // Raw-ish terminal: no echo, no line buffering, keep signals; alternate screen, no wrap, hidden cursor.
     if (tcgetattr(STDIN_FILENO, &saved_termios) == 0) {
@@ -252,7 +278,8 @@ int main(int argc, char **argv) {
                 colOffset[x] = random_float(x + 0.5, 0.0) * 1000.0;
                 // Column speed ~ Normal(mean, sigma) with ~95% of columns inside [speedMin, speedMax];
                 // the tails are the fast and slow outliers, clamped at 3 sigma and never below a tenth of the mean.
-                double mean = 0.5 * (cfg.speedMin + cfg.speedMax), sigma = 0.25 * (cfg.speedMax - cfg.speedMin);
+                double lo = cfg.speedMin * cfg.speedK, hi = cfg.speedMax * cfg.speedK;   // --speed-k scales the whole band
+                double mean = 0.5 * (lo + hi), sigma = 0.25 * (hi - lo);
                 double u1 = fmax(1e-9, random_float(x + 0.5 + 0.1, 0.0)), u2 = random_float(x + 0.5, 0.3);
                 double z = sqrt(-2.0 * log(u1)) * cos(2.0 * PI * u2);
                 colSpeed[x] = fmin(mean + 3.0 * sigma, fmax(fmax(0.1 * mean, mean - 3.0 * sigma), mean + sigma * z));
