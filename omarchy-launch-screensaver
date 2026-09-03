@@ -5,8 +5,11 @@
 # Drop-in replacement for Omarchy's omarchy-launch-screensaver. It is symlinked into
 # ~/.local/bin, which ~/.bashrc puts ahead of $OMARCHY_PATH/bin, so the Omarchy shell's
 # idle service (shell.json -> idle.screensaver) and the Omarchy menu launch this instead
-# of the terminal (ttfx) screensaver. Falls back to the stock screensaver if Chromium is
-# not installed.
+# of the terminal (ttfx) screensaver.
+#
+# Runs native/matrix-rain when it has been built (make -C native); otherwise the same
+# effect as a Chromium kiosk window; and if neither is available, the stock screensaver.
+# MATRIX_ARGS passes extra options to the native binary, e.g. MATRIX_ARGS="--columns 120".
 #
 # Usage: omarchy-launch-screensaver [force]      (force ignores the screensaver-off toggle)
 #        omarchy-launch-screensaver stop
@@ -36,8 +39,13 @@ if omarchy-toggle-enabled screensaver-off && [[ $1 != "force" ]]; then
   exit 1
 fi
 
-# No Chromium? Use Omarchy's own screensaver instead.
-if ! command -v "$BROWSER" >/dev/null 2>&1; then
+# Pick the renderer: native build, Chromium, or Omarchy's own screensaver.
+NATIVE="$MATRIX_DIR/native/matrix-rain"
+if [[ -x $NATIVE ]]; then
+  mode=native
+elif command -v "$BROWSER" >/dev/null 2>&1; then
+  mode=browser
+else
   exec "$STOCK" "$@"
 fi
 
@@ -77,6 +85,12 @@ wait_for_screensaver_window() {
 rm -rf "$PROFILE_BASE"-* 2>/dev/null
 for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
   hypr_focus_monitor "$m"
+  if [[ $mode == native ]]; then
+    # One native process per monitor; it exits by itself on input.
+    hypr_exec "$NATIVE" --screensaver --app-id "$CLASS" $MATRIX_ARGS
+    wait_for_screensaver_window
+    continue
+  fi
   # One Chromium process per monitor, each with a throwaway profile so it never
   # collides with a browser you already have open.
   hypr_exec "$BROWSER" \

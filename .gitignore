@@ -6,3 +6,6 @@
 # Local experiments (screenshots, scratch pages)
 *.png
 scratch/
+
+# Build output
+native/matrix-rain
