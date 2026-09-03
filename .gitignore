@@ -9,3 +9,4 @@ scratch/
 
 # Build output
 native/matrix-rain
+native/matrix-rain-tty

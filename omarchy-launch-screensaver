@@ -24,6 +24,7 @@ STOCK="${OMARCHY_PATH:-/usr/share/omarchy}/bin/omarchy-launch-screensaver"
 
 stop_screensaver() {
   pkill -f "[o]rg.omarchy.screensaver" 2>/dev/null
+  hyprctl eval 'hl.config({ cursor = { invisible = false } })' >/dev/null 2>&1 || hyprctl keyword cursor:invisible false >/dev/null 2>&1
 }
 
 if [[ $1 == stop ]]; then
@@ -39,15 +40,39 @@ if omarchy-toggle-enabled screensaver-off && [[ $1 != "force" ]]; then
   exit 1
 fi
 
-# Pick the renderer: native build, Chromium, or Omarchy's own screensaver.
+# Pick the renderer. MATRIX_RENDERER (or the one-word file "renderer" next to this
+# script) selects terminal | native | browser; otherwise the best available is used.
 NATIVE="$MATRIX_DIR/native/matrix-rain"
-if [[ -x $NATIVE ]]; then
-  mode=native
-elif command -v "$BROWSER" >/dev/null 2>&1; then
-  mode=browser
-else
-  exec "$STOCK" "$@"
+TTY="$MATRIX_DIR/native/matrix-rain-tty"
+mode="${MATRIX_RENDERER:-$(cat "$MATRIX_DIR/renderer" 2>/dev/null)}"
+case $mode in
+  terminal) [[ -x $TTY ]] || mode="" ;;
+  native)   [[ -x $NATIVE ]] || mode="" ;;
+  browser)  command -v "$BROWSER" >/dev/null 2>&1 || mode="" ;;
+  *)        mode="" ;;
+esac
+if [[ -z $mode ]]; then
+  if [[ -x $NATIVE ]]; then mode=native
+  elif [[ -x $TTY ]]; then mode=terminal
+  elif command -v "$BROWSER" >/dev/null 2>&1; then mode=browser
+  else exec "$STOCK" "$@"
+  fi
 fi
+
+# The terminal renderer runs inside your default terminal, using Omarchy's own
+# screensaver terminal configs (black background, large font, no padding).
+if [[ $mode == terminal ]]; then
+  terminal=$(xdg-terminal-exec --print-id 2>/dev/null)
+  case $terminal in
+    *Alacritty* | *ghostty* | *foot* | *kitty*) ;;
+    *) mode=native; [[ -x $NATIVE ]] || mode=browser ;;
+  esac
+fi
+
+# Hide the pointer while a terminal screensaver is up (the GL and browser windows hide it themselves).
+set_cursor_hidden() {
+  hyprctl eval "hl.config({ cursor = { invisible = $1 } })" >/dev/null 2>&1 || hyprctl keyword cursor:invisible "$1" >/dev/null 2>&1
+}
 
 focused=$(omarchy-hyprland-monitor-focused)
 
@@ -88,6 +113,21 @@ for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
   if [[ $mode == native ]]; then
     # One native process per monitor; it exits by itself on input.
     hypr_exec "$NATIVE" --screensaver --app-id "$CLASS" $MATRIX_ARGS
+    wait_for_screensaver_window
+    continue
+  fi
+  if [[ $mode == terminal ]]; then
+    set_cursor_hidden true
+    # Omarchy's screensaver configs use an 18 pt font; the rain looks better smaller.
+    # MATRIX_TTY_LINE_HEIGHT (e.g. 18px) spaces the rows out without changing the glyph size.
+    size="${MATRIX_TTY_FONT_SIZE:-9}"
+    lh="${MATRIX_TTY_LINE_HEIGHT:-}"
+    case $terminal in
+      *Alacritty*) hypr_exec alacritty --class="$CLASS" --config-file "$OMARCHY_PATH/default/alacritty/screensaver.toml" -o "font.size=$size" ${lh:+-o "font.offset.y=${lh%px}"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;
+      *ghostty*)   hypr_exec ghostty --class="$CLASS" --config-file="$OMARCHY_PATH/default/ghostty/screensaver" --font-size="$size" ${lh:+--adjust-cell-height="${lh%px}"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;
+      *foot*)      hypr_exec foot --app-id="$CLASS" --config="$OMARCHY_PATH/default/foot/screensaver.ini" -o "main.font=JetBrainsMono Nerd Font:size=$size" ${lh:+-o "main.line-height=$lh"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;
+      *kitty*)     hypr_exec kitty --class="$CLASS" --override "font_size=$size" --override window_padding_width=0 ${lh:+--override "modify_font=cell_height ${lh%px}px"} -e "$TTY" --screensaver $MATRIX_TTY_ARGS ;;
+    esac
     wait_for_screensaver_window
     continue
   fi
