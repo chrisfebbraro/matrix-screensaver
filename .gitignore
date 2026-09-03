@@ -3,10 +3,5 @@
 *~
 .DS_Store
 
-# Local experiments (screenshots, scratch pages)
-*.png
-scratch/
-
 # Build output
-native/matrix-rain
-native/matrix-rain-tty
+matrix-rain-tty

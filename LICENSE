@@ -19,11 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-The glyph atlas embedded in matrix.html (matrixcode_msdf.png) and the rain,
-bloom and palette shader design are derived from Rezmason's "matrix"
-(https://github.com/Rezmason/matrix), also released under the MIT License:
-
-Copyright (c) 2018 Rezmason
