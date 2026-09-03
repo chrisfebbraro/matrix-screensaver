@@ -10,8 +10,11 @@
 //   matrix-rain-tty [--screensaver] [--head C] [--stream RRGGBB] [--flat] [--trail N] [--gap N]
 //                   [--fall-speed F] [--period F] [--period-k F] [--speed-min F] [--speed-max F]
 //                   [--speed-k F] [--cycle-speed F] [--animation-speed F] [--fps N]
+//                   [--config PATH] [--no-config]
 //
-// --screensaver exits on any key; otherwise q, Escape or Ctrl-C quits.
+// Settings are read from ~/.config/matrix-screensaver/config (key = value, same names as
+// the options), then overridden by the command line. --screensaver exits on any key;
+// otherwise q, Escape or Ctrl-C quits.
 
 #define _POSIX_C_SOURCE 200809L
 #define PI 3.14159265358979323846
@@ -189,6 +192,7 @@ static void usage(FILE *out) {
     fputs("usage: matrix-rain-tty [--screensaver] [--head C] [--stream RRGGBB] [--flat] [--trail N] [--gap N]\n"
           "                       [--fall-speed F] [--period F] [--period-k F] [--speed-min F] [--speed-max F]\n"
           "                       [--speed-k F] [--cycle-speed F] [--animation-speed F] [--fps N]\n"
+          "                       [--config PATH] [--no-config]\n"
           "  --screensaver   exit on any key; otherwise q, Escape or Ctrl-C quits\n"
           "  --head C        head colour: white (default), green, or hex RRGGBB\n"
           "  --stream C      stream colour as hex RRGGBB (default green); it fades to black behind the head\n"
@@ -202,33 +206,97 @@ static void usage(FILE *out) {
           "  --speed-max F   [min, max] (defaults 0.5, 1.5); the rest are faster or slower outliers, never stopped\n"
           "  --speed-k F     scales the whole band (default 0.9)\n"
           "  --cycle-speed F how often glyphs change, per 1/60 s (default 0.005)\n"
-          "  --fps N         frames per second (default 30)\n", out);
+          "  --fps N         frames per second (default 30)\n"
+          "  --config PATH   settings file, key = value with the option names (default ~/.config/matrix-screensaver/config)\n"
+          "  --no-config     ignore the settings file\n", out);
+}
+
+static bool parse_bool(const char *v, bool *out) {
+    if (!strcmp(v, "true") || !strcmp(v, "yes") || !strcmp(v, "on") || !strcmp(v, "1")) { *out = true; return true; }
+    if (!strcmp(v, "false") || !strcmp(v, "no") || !strcmp(v, "off") || !strcmp(v, "0")) { *out = false; return true; }
+    return false;
+}
+
+// One knob, by its name without the leading dashes. Used for both the command line and
+// the config file. Returns false for an unknown key or a bad value.
+static bool apply_option(const char *key, const char *value, Config *c) {
+    struct { const char *name; float *field; } nums[] = {
+        { "fall-speed", &c->fallSpeed }, { "cycle-speed", &c->cycleSpeed }, { "period", &c->period },
+        { "raindrop-length", &c->period }, { "period-k", &c->periodK }, { "speed-min", &c->speedMin },
+        { "speed-max", &c->speedMax }, { "speed-k", &c->speedK }, { "trail", &c->trail },
+        { "animation-speed", &c->animationSpeed }, { "fps", &c->fps },
+    };
+    for (size_t i = 0; i < sizeof nums / sizeof nums[0]; i++) {
+        if (!strcmp(key, nums[i].name)) {
+            if (!value) return false;
+            char *end; *nums[i].field = strtof(value, &end);
+            return end != value && *end == 0;
+        }
+    }
+    if (!strcmp(key, "gap")) { if (!value) return false; char *end; c->gap = (int)strtol(value, &end, 10); return end != value && *end == 0; }
+    if (!strcmp(key, "head")) { if (!value) return false; c->head = strdup(value); return true; }
+    if (!strcmp(key, "stream")) { if (!value) return false; c->stream = strdup(value); return true; }
+    if (!strcmp(key, "flat")) return value ? parse_bool(value, &c->flat) : (c->flat = true);
+    if (!strcmp(key, "screensaver")) return value ? parse_bool(value, &c->screensaver) : (c->screensaver = true);
+    return false;
+}
+
+static bool is_flag(const char *key) { return !strcmp(key, "flat") || !strcmp(key, "screensaver"); }
+
+// Config file: "key = value" per line, keys as the option names, # comments. Keys the
+// launcher uses (font-size, line-height, theme) are ignored here.
+static bool load_config(const char *path, Config *c, bool mustExist) {
+    FILE *f = fopen(path, "r");
+    if (!f) { if (mustExist) fprintf(stderr, "matrix-rain-tty: cannot open %s\n", path); return !mustExist; }
+    char line[512];
+    int lineno = 0;
+    bool ok = true;
+    while (fgets(line, sizeof line, f)) {
+        lineno++;
+        char *hash = strchr(line, '#'); if (hash) *hash = 0;
+        char *s = line; while (*s == ' ' || *s == '\t') s++;
+        char *e = s + strlen(s); while (e > s && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\n' || e[-1] == '\r')) *--e = 0;
+        if (!*s) continue;
+        char *eq = strchr(s, '=');
+        if (!eq) { fprintf(stderr, "matrix-rain-tty: %s:%d: expected key = value\n", path, lineno); ok = false; continue; }
+        *eq = 0;
+        char *k = s, *ke = eq; while (ke > k && (ke[-1] == ' ' || ke[-1] == '\t')) *--ke = 0;
+        char *v = eq + 1; while (*v == ' ' || *v == '\t') v++;
+        if (!strcmp(k, "font-size") || !strcmp(k, "line-height") || !strcmp(k, "theme")) continue;
+        if (!apply_option(k, v, c)) { fprintf(stderr, "matrix-rain-tty: %s:%d: bad setting '%s = %s'\n", path, lineno, k, v); ok = false; }
+    }
+    fclose(f);
+    return ok;
+}
+
+static void default_config_path(char *buf, size_t n) {
+    const char *xdg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
+    if (xdg && *xdg) snprintf(buf, n, "%s/matrix-screensaver/config", xdg);
+    else if (home) snprintf(buf, n, "%s/.config/matrix-screensaver/config", home);
+    else buf[0] = 0;
 }
 
 static bool parse_args(int argc, char **argv, Config *c) {
+    // The config file first (--config PATH picks another, --no-config skips it), then the
+    // command line on top.
+    char path[1024];
+    default_config_path(path, sizeof path);
+    bool useConfig = true, explicitConfig = false;
     for (int i = 1; i < argc; i++) {
-        const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : NULL;
-#define NUM(flag, field) if (!strcmp(a, flag)) { if (!v) return false; c->field = strtof(v, NULL); i++; continue; }
-        NUM("--fall-speed", fallSpeed)
-        NUM("--cycle-speed", cycleSpeed)
-        NUM("--period", period)
-        NUM("--raindrop-length", period)      // older name
-        NUM("--period-k", periodK)
-        NUM("--speed-min", speedMin)
-        NUM("--speed-max", speedMax)
-        NUM("--speed-k", speedK)
-        NUM("--trail", trail)
-        NUM("--animation-speed", animationSpeed)
-        NUM("--fps", fps)
-#undef NUM
-        if (!strcmp(a, "--gap")) { if (!v) return false; c->gap = atoi(v); i++; continue; }
-        if (!strcmp(a, "--head")) { if (!v) return false; c->head = v; i++; continue; }
-        if (!strcmp(a, "--stream")) { if (!v) return false; c->stream = v; i++; continue; }
-        if (!strcmp(a, "--screensaver")) { c->screensaver = true; continue; }
-        if (!strcmp(a, "--flat")) { c->flat = true; continue; }
+        if (!strcmp(argv[i], "--no-config")) useConfig = false;
+        else if (!strcmp(argv[i], "--config") && i + 1 < argc) { snprintf(path, sizeof path, "%s", argv[++i]); explicitConfig = true; }
+    }
+    if (useConfig && path[0] && !load_config(path, c, explicitConfig)) return false;
+
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        if (!strcmp(a, "--no-config")) continue;
+        if (!strcmp(a, "--config")) { i++; continue; }
         if (!strcmp(a, "--help") || !strcmp(a, "-h")) { usage(stdout); exit(0); }
-        fprintf(stderr, "matrix-rain-tty: unknown option %s\n", a);
-        return false;
+        if (strncmp(a, "--", 2) != 0) { fprintf(stderr, "matrix-rain-tty: unexpected argument %s\n", a); return false; }
+        const char *key = a + 2, *value = NULL;
+        if (!is_flag(key)) { if (i + 1 >= argc) { fprintf(stderr, "matrix-rain-tty: %s needs a value\n", a); return false; } value = argv[++i]; }
+        if (!apply_option(key, value, c)) { fprintf(stderr, "matrix-rain-tty: bad option %s%s%s\n", a, value ? " " : "", value ? value : ""); return false; }
     }
     int rgb[3];
     if (strcmp(c->head, "white") && strcmp(c->head, "green") && !parse_hex(c->head, rgb)) return false;

@@ -86,7 +86,17 @@ else
   say "added the PATH line to $BASHRC (backup in $BASHRC.bak.matrix-screensaver)"
 fi
 
-# 4. Verify the way it will really be used
+# 4. A settings file to edit, unless one exists already
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/matrix-screensaver"
+if [[ -f $CONFIG_DIR/config ]]; then
+  say "keeping your settings in $CONFIG_DIR/config"
+else
+  mkdir -p "$CONFIG_DIR"
+  cp "$HERE/config.example" "$CONFIG_DIR/config"
+  say "wrote default settings to $CONFIG_DIR/config (edit it to tune the rain)"
+fi
+
+# 5. Verify the way it will really be used
 if resolves_to_ours; then
   say "verified: a login shell resolves omarchy-launch-screensaver to $LINK"
 else

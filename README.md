@@ -44,14 +44,18 @@ Try it now: `omarchy-launch-screensaver force`. Any key dismisses it.
 | --- | --- |
 | `matrix-rain-tty.c` | The renderer. Plain C11, needs only libm; raw ANSI escapes, 24-bit colour, redraws only changed cells. |
 | `omarchy-launch-screensaver` | Drop-in replacement for Omarchy's launcher. |
-| `install.sh` | Builds, links, fixes the PATH order and verifies; `install.sh uninstall` reverses it. |
+| `install.sh` | Builds, links, fixes the PATH order, writes the default settings file and verifies; `install.sh uninstall` reverses it. |
+| `config.example` | The settings file with every knob explained; installed as `~/.config/matrix-screensaver/config`. |
 | `Makefile` | `make` builds `matrix-rain-tty`. |
 | `tests/e2e.sh` | Manual live check: launch as the idle service would, confirm the window, dismiss with a synthetic keypress. |
 
 ## Tuning
 
-Everything is a command-line option on `matrix-rain-tty` (see `--help`); the launcher
-passes `MATRIX_TTY_ARGS` through, so for example
+Edit `~/.config/matrix-screensaver/config`. The installer puts a fully commented copy of
+[`config.example`](config.example) there; every knob below is a `key = value` line in it,
+and the next launch picks it up. The same keys work as command-line options on
+`matrix-rain-tty` (see `--help`), which override the file, and the launcher passes
+`MATRIX_TTY_ARGS` through for one-off experiments:
 
 ```bash
 MATRIX_TTY_ARGS="--trail 12 --speed-k 0.8" omarchy-launch-screensaver force

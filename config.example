@@ -1,0 +1,65 @@
+# Matrix digital rain screensaver: settings.
+#
+# Installed as ~/.config/matrix-screensaver/config. Edit, save, and the next launch uses
+# it (try it: omarchy-launch-screensaver force). Lines starting with # are comments;
+# every key is optional and the value shown is the default. The same keys work as
+# --options on matrix-rain-tty, which override this file.
+
+# --- Motion ---------------------------------------------------------------------------
+
+# Base speed. A column at relative speed 1 falls 100 x this many rows per second.
+fall-speed = 0.105
+
+# Column speeds are random, normally distributed, relative to fall-speed. About 95% of
+# columns fall inside [speed-min, speed-max]; the rest are faster or slower outliers,
+# clamped so no column ever stops.
+speed-min = 0.5
+speed-max = 1.5
+
+# Scales speed-min and speed-max together.
+speed-k = 0.9
+
+# Base spacing between drops in a column: 100 x this many rows at the mean speed,
+# jittered per drop.
+period = 0.8
+
+# Faster columns space their drops out more: spacing = period x (speed / mean)^period-k.
+# 0 gives every column the same spacing.
+period-k = 0.8
+
+# Rows lit behind each head. Drops in a column never come closer than this.
+trail = 20
+
+# Blank columns between streams. 1 leaves every other column empty.
+gap = 0
+
+# How often glyphs change in place, per 1/60 s. 0.005 is roughly every 3 seconds.
+cycle-speed = 0.005
+
+# Frames per second.
+fps = 30
+
+# --- Colour ----------------------------------------------------------------------------
+
+# By default the launcher colours the rain from the current Omarchy theme (stream = the
+# theme's accent, head = its bright foreground). Set theme = false to use the colours
+# below instead, or set head / stream here to pin just one of them.
+theme = true
+
+# Head colour: white, green, or a hex colour like ff00ff.
+# head = white
+
+# Stream colour as a hex colour; it fades to black towards the tail.
+# stream = 14b856
+
+# One colour for the whole stream instead of the fade.
+flat = false
+
+# --- Terminal (used by the launcher) --------------------------------------------------
+
+# Font size in points. The font itself is your Omarchy monospace font.
+font-size = 9
+
+# Row height. For foot and kitty this is the cell height; for Alacritty and Ghostty it is
+# applied as an adjustment. Leave unset to use the font's own line height.
+line-height = 14px

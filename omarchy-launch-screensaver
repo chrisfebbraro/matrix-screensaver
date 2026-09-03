@@ -95,24 +95,34 @@ wait_for_screensaver_window() {
   done
 }
 
+# Settings file: ~/.config/matrix-screensaver/config (see config.example). matrix-rain-tty
+# reads its own keys from it; the launcher reads font-size, line-height and theme here.
+# Environment variables override the file.
+CONFIG="${MATRIX_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/matrix-screensaver/config}"
+cfg_get() { [[ -f $CONFIG ]] && sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([^#]*\).*/\1/p" "$CONFIG" | tail -1 | sed 's/[[:space:]]*$//'; }
+
 # Terminal font: the system monospace font Omarchy is set to, at 9 pt rather than the 18 pt
 # of Omarchy's screensaver configs, with rows tighter than a Nerd Font's ~18 px line metrics.
 font=$(omarchy-font-current 2>/dev/null); font="${font:-JetBrainsMono Nerd Font}"
-size="${MATRIX_TTY_FONT_SIZE:-9}"
-lh="${MATRIX_TTY_LINE_HEIGHT:-14px}"
-adj="${MATRIX_TTY_LINE_HEIGHT:-}"
+size="${MATRIX_TTY_FONT_SIZE:-$(cfg_get font-size)}"; size="${size:-9}"
+lh="${MATRIX_TTY_LINE_HEIGHT:-$(cfg_get line-height)}"
+adj="$lh"
+[[ -n ${MATRIX_TTY_LINE_HEIGHT+x} || -n $(cfg_get line-height) ]] || lh="14px"
 
 # Colour the rain from the current Omarchy theme: the stream takes the accent, the head
-# the bright foreground. Anything in MATRIX_TTY_ARGS comes later on the command line,
-# so it still overrides.
+# the bright foreground. A head or stream set in the config file is left alone, and
+# anything in MATRIX_TTY_ARGS comes later on the command line, so it still overrides.
+theme="${MATRIX_TTY_THEME:-$(cfg_get theme)}"; theme="${theme:-1}"
 theme_args=()
-if [[ ${MATRIX_TTY_THEME:-1} != 0 ]]; then
+if [[ $theme != 0 && $theme != false && $theme != no && $theme != off ]]; then
   accent=$(omarchy-theme-color accent 2>/dev/null); head=$(omarchy-theme-color bright_foreground 2>/dev/null)
-  [[ $accent =~ ^#?[0-9A-Fa-f]{6}$ ]] && theme_args+=(--stream "${accent#\#}")
-  [[ $head =~ ^#?[0-9A-Fa-f]{6}$ ]] && theme_args+=(--head "${head#\#}")
+  [[ -z $(cfg_get stream) && $accent =~ ^#?[0-9A-Fa-f]{6}$ ]] && theme_args+=(--stream "${accent#\#}")
+  [[ -z $(cfg_get head) && $head =~ ^#?[0-9A-Fa-f]{6}$ ]] && theme_args+=(--head "${head#\#}")
 fi
 # shellcheck disable=SC2206
-args=(--screensaver "${theme_args[@]}" $MATRIX_TTY_ARGS)
+args=(--screensaver)
+[[ -f $CONFIG ]] && args+=(--config "$CONFIG")
+args+=("${theme_args[@]}" $MATRIX_TTY_ARGS)
 
 set_cursor_hidden true
 for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
